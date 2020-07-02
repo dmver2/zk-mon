@@ -1,0 +1,308 @@
+package ru.vtb.afsc.pe.nio;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.net.SocketAddress;
+import java.net.StandardSocketOptions;
+import java.nio.ByteBuffer;
+import java.nio.channels.AsynchronousSocketChannel;
+import java.nio.channels.CompletionHandler;
+import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.function.Consumer;
+
+import static ru.vtb.afsc.pe.nio.AsyncSocketClient.AttachmentNio2.ACT.READ;
+import static ru.vtb.afsc.pe.nio.AsyncSocketClient.AttachmentNio2.ACT.WRITE;
+
+public class AsyncSocketClient {
+    private static final Logger LOGGER = LoggerFactory.getLogger(AsyncSocketClient.class);
+    private final InetSocketAddress hostAddress;
+    private final Object lock = new Object();
+    private final ReadWriteHandler rwCompletionHandler;
+    private final NetStreamHandler streamHandler;
+    private AsynchronousSocketChannel aioChannel;
+    private volatile boolean connected;
+    private volatile Runnable pendingSend;
+    private CompletableFuture<AttachmentNio2> readComplete = new CompletableFuture<>();
+
+    public AsyncSocketClient(final String host, final int port) {
+        this(new InetSocketAddress(host, port), new HttpSteamHandler());
+    }
+
+    public AsyncSocketClient(final InetSocketAddress hostAddress,
+                             final NetStreamHandler streamHandler) {
+        this.hostAddress = hostAddress;
+        this.streamHandler = streamHandler;
+        this.rwCompletionHandler = new ReadWriteHandler();
+        this.pendingSend = () -> {
+        };
+    }
+
+    public AsynchronousSocketChannel getChannel() {
+        return aioChannel;
+    }
+
+    public InetSocketAddress getHostAddress() {
+        return hostAddress;
+    }
+
+    public CompletableFuture<AttachmentNio2> getReadComplete() {
+        if (readComplete.isDone()) {
+            readComplete = new CompletableFuture<>();
+        }
+        return readComplete;
+    }
+
+    private void open() throws IOException {
+        aioChannel = AsynchronousSocketChannel.open();
+        aioChannel.setOption(StandardSocketOptions.SO_KEEPALIVE, true);
+    }
+
+    public AttachmentNio2 sendMessage(final byte[] message, final Consumer<AttachmentNio2> sink) {
+        final ByteBuffer buffer = ByteBuffer.allocate(0x200);
+        buffer.put(message).flip();
+
+        final AttachmentNio2 att = new AttachmentNio2(buffer, hostAddress, null, sink);
+        synchronized (lock) {
+            if (!connected) {
+                LOGGER.trace("PENDING WRITE");
+                pendingSend = () -> sendMessage(message, sink);
+                return att;
+            }
+        }
+        aioChannel.write(buffer, att, rwCompletionHandler);
+        return att;
+    }
+
+    public AttachmentNio2 sendMessage(final byte[] message) {
+        return sendMessage(message, (e) -> {
+        });
+    }
+
+    public AsyncSocketClient start(final Runnable callOnConnect) throws IOException {
+        open();
+        aioChannel.connect(hostAddress, this, new CompletionHandler<>() {
+
+            @Override
+            public void completed(final Void aVoid, final AsyncSocketClient socketClient) {
+                LOGGER.trace("connected to " + hostAddress);
+                final Runnable deferred;
+                synchronized (lock) {
+                    connected = true;
+                    deferred = (null != callOnConnect) ? callOnConnect : pendingSend;
+                    pendingSend = () -> {
+                    };
+                }
+                deferred.run();
+            }
+
+            @Override
+            public void failed(final Throwable throwable,
+                               final AsyncSocketClient socketClient) {
+                LOGGER.error("ERROR", throwable);
+            }
+        });
+        return this;
+    }
+
+    public void stop() {
+        try {
+            aioChannel.close();
+        } catch (final IOException e) {
+            LOGGER.error("ERROR CLOSING CHANNEL", e);
+        } finally {
+            connected = false;
+        }
+    }
+
+    public static final class AttachmentNio2 {
+        final SocketAddress address;
+        final ByteBuffer buffer;
+        final Consumer<AttachmentNio2> consumer;
+        StringBuilder response;
+        ACT action;
+        int bytesReceived;
+        int bytesSent;
+        boolean chunked;
+        int contentLength;
+        Throwable error;
+        int headerLength;
+
+        private AttachmentNio2(final ByteBuffer buffer, final SocketAddress address,
+                               final StringBuilder stringBuilder,
+                               final Consumer<AttachmentNio2> consumer) {
+            this.buffer = buffer;
+            this.address = address;
+            response = stringBuilder;
+            this.consumer = consumer;
+            action = READ;
+        }
+
+        public String getPayload() {
+            return Optional.ofNullable(response).map(s -> s.toString().substring(headerLength))
+                    .orElse("");
+        }
+
+        @Override
+        public String toString() {
+            final StringBuilder sb =
+                    new StringBuilder(
+                            0x200 + Optional.ofNullable(this.response).map(e -> e.length())
+                                    .orElse(0));
+            sb.append("AttachmentNio2{");
+            sb.append("action=").append(action);
+            sb.append(", address=").append(address);
+            sb.append(", buffer=").append(buffer);
+            sb.append(", bytesReceived=").append(bytesReceived);
+            sb.append(", bytesSent=").append(bytesSent);
+            sb.append(", chunked=").append(chunked);
+            sb.append(", consumer=").append(consumer);
+            sb.append(", contentLength=").append(contentLength);
+            sb.append(", error=").append(error);
+            sb.append(", headerLength=").append(headerLength);
+            sb.append(", response=").append(response);
+            sb.append('}');
+            return sb.toString();
+        }
+
+        enum ACT {
+            READ, WRITE
+        }
+    }
+
+    private class ReadWriteHandler implements
+                                   CompletionHandler<Integer, AttachmentNio2> {
+
+        @Override
+        public void completed(final Integer ioBytes,
+                              final AttachmentNio2 actionInfo) {
+            LOGGER.trace("length: {} a:{}", ioBytes, actionInfo);
+            if (READ == actionInfo.action) {
+                final ByteBuffer buffer = actionInfo.buffer;
+                actionInfo.bytesSent += ioBytes;
+                if (buffer.limit() == buffer.position()) {
+                    // all bytes sent at once or end of buffer reached
+                    LOGGER.trace("all bytes sent");
+                    actionInfo.action = WRITE;
+                    buffer.clear();
+                    aioChannel.read(buffer, actionInfo, this);
+                } else {
+                    LOGGER.trace("sending rest of buffer");
+                    aioChannel.write(buffer, actionInfo, this);
+                }
+            } else if (WRITE == actionInfo.action) {
+                doRead(ioBytes, actionInfo);
+            }
+        }
+
+        private void doRead(final Integer ioBytes, final AttachmentNio2 actionInfo) {
+            if (streamHandler.readBytes(ioBytes, actionInfo)) {
+                aioChannel.read(actionInfo.buffer, actionInfo, this);
+            } else {
+                readComplete.complete(actionInfo);
+                actionInfo.consumer.accept(actionInfo);
+            }
+        }
+
+        @Override
+        public void failed(final Throwable throwable, final AttachmentNio2 attachment) {
+            LOGGER.error("FAILED", throwable);
+            LOGGER.error("FAILED ATTACHMENT {}", attachment);
+            attachment.error = throwable;
+            readComplete.complete(attachment);
+            attachment.consumer.accept(attachment);
+        }
+    }
+}package ru.vtb.afsc.pe.nio;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
+import java.util.Optional;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+public class HttpSteamHandler implements NetStreamHandler {
+    private static final Pattern CHUNKED_TRANSFER_ENC_PTN = Pattern
+            .compile("^Transfer-Encoding:\\s+chunked$", Pattern.DOTALL | Pattern.MULTILINE);
+    private static final int CHUNKED_TRANSFER_ENC_LENGTH = CHUNKED_TRANSFER_ENC_PTN.pattern()
+            .length();
+    private static final Pattern CONTENT_LENGTH_PATTERN = Pattern
+            .compile("^Content-Length:\\s+(\\d+)$", Pattern.DOTALL | Pattern.MULTILINE);
+    private static final int CONTENT_LENGTH_PATTERN_LENGTH = CONTENT_LENGTH_PATTERN.pattern()
+            .indexOf(':') + 16;
+    private static final String HDR_MARK_STR = "\r\n\r\n";
+    private static final Logger LOGGER = LoggerFactory.getLogger(HttpSteamHandler.class);
+
+    @Override
+    public boolean readBytes(final Integer ioBytes,
+                             final AsyncSocketClient.AttachmentNio2 actionInfo) {
+
+        if (ioBytes == -1) {
+            LOGGER.trace("[DETECTED] NO MORE DATA");
+            return true;
+        } else {
+            actionInfo.bytesReceived += ioBytes;
+        }
+        final ByteBuffer buffer = actionInfo.buffer;
+        buffer.flip();
+        final String chunk = StandardCharsets.ISO_8859_1.decode(buffer).toString();
+        LOGGER.trace(">> " + chunk);
+
+        final StringBuilder sb =
+                Optional.ofNullable(actionInfo.response)
+                        .orElseGet(() -> actionInfo.response = new StringBuilder(0x400));
+        final int searchPosition = sb.length();
+        sb.append(chunk);
+        final String responseAsStr = sb.toString();
+
+        if (0 == actionInfo.contentLength) {
+            final Matcher m = CONTENT_LENGTH_PATTERN.matcher(responseAsStr);
+            if (m.find(Math.max(0, searchPosition - CONTENT_LENGTH_PATTERN_LENGTH))) {
+                actionInfo.contentLength = Integer.parseInt(m.group(1));
+            }
+        } else {
+            if (CHUNKED_TRANSFER_ENC_PTN.matcher(responseAsStr)
+                    .find(Math.max(0, searchPosition - CHUNKED_TRANSFER_ENC_LENGTH))) {
+                actionInfo.chunked = true;
+            }
+        }
+        // find end of header
+        if (0 == actionInfo.headerLength) {
+            final int eohPos;
+            if (-1 != (eohPos = responseAsStr.indexOf(HDR_MARK_STR,
+                    searchPosition - HDR_MARK_STR.length()))) {
+                actionInfo.headerLength = eohPos + HDR_MARK_STR.length();
+            }
+        }
+        final int headerLength = actionInfo.headerLength;
+        final int contentLength = actionInfo.contentLength;
+
+        boolean eof = false;
+        if (!(0 == contentLength || 0 == headerLength)) {
+            if (contentLength <= sb.length() - headerLength) {
+                LOGGER.trace("EOF>>>");
+                eof = true;
+            }
+        } else if (actionInfo.chunked) {
+            LOGGER.trace("[DETECTED] chunkedTransferEncoding");
+            if (chunk.endsWith("0\r\n")) {
+                eof = true;
+            }
+        }
+        buffer.clear();
+        return eof;
+    }
+}
+package ru.vtb.afsc.pe.nio;
+
+public interface NetStreamHandler {
+    boolean readBytes(Integer ioBytes,
+                      AsyncSocketClient.AttachmentNio2 actionInfo);
+}
+
