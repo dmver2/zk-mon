@@ -5,8 +5,10 @@ import org.slf4j.LoggerFactory;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.net.StandardSocketOptions;
+import java.net.URL;
 import java.nio.ByteBuffer;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
@@ -21,6 +23,7 @@ import java.util.concurrent.TimeUnit;
 
 class NioController implements Runnable, AutoCloseable {
     public static final int RECV_BUF = 0x8000;
+    public static final long REQ_PERIOD = 5000L;
     private static final Logger LOG = LoggerFactory.getLogger(NioController.class);
     private final Object objLock = new Object();
     private final List<BasicTask> requests;
@@ -50,11 +53,13 @@ class NioController implements Runnable, AutoCloseable {
         final SocketChannel channel;
         channel = SocketChannel.open();
         final var rcvBufSize = channel.getOption(StandardSocketOptions.SO_RCVBUF);
-        LOG.debug("recv buffer size: {} {} {}", rcvBufSize, (rcvBufSize < RECV_BUF) ? '<' : ">=",
+        LOG.debug("recv buffer size: {} {} {}",
+                rcvBufSize, (rcvBufSize < RECV_BUF) ? '<' : ">=",
                 RECV_BUF);
         if (rcvBufSize < RECV_BUF) {
             channel.setOption(StandardSocketOptions.SO_RCVBUF, RECV_BUF);
-            LOG.debug("new recv buffer size set to {} instead of {}",
+            LOG.debug("{} new recv buffer size set to {} instead of {}",
+                    attachment.task.url,
                     channel.getOption(StandardSocketOptions.SO_RCVBUF), rcvBufSize);
         }
         channel.configureBlocking(false);
@@ -66,10 +71,10 @@ class NioController implements Runnable, AutoCloseable {
     private Att makeAttachment(final BasicTask task) {
         final byte[] messageBytes =
                 task.request.getBytes(StandardCharsets.ISO_8859_1);
-
+        final InetSocketAddress inetAddr = new InetSocketAddress(task.url.getHost(), task.url.getPort());
         return new Att(
                 task,
-                task.address,
+                inetAddr,
                 ByteBuffer.wrap(messageBytes),
                 ByteBuffer.allocate(0x400),
                 new StringBuilder(0x800)
@@ -104,7 +109,7 @@ class NioController implements Runnable, AutoCloseable {
         try {
             initConn(atta);
         } catch (final IOException e) {
-            LOG.error("ERROR CONNECTING AFTER ERROR", e);
+            LOG.error(String.format("ERROR CONNECTING %s AFTER ERROR", atta.task.url), e);
         }
     }
 
@@ -124,7 +129,8 @@ class NioController implements Runnable, AutoCloseable {
         try {
             iobytes = channel.read(readBuffer);
         } catch (final IOException e) {
-            LOG.error("Reading problem, closing connection to {}",
+            LOG.error("Reading problem {}, closing connection to {}",
+                    getRequestUrl(key),
                     channel.getRemoteAddress(), e);
             key.cancel();
             closeQuietly(channel);
@@ -141,7 +147,6 @@ class NioController implements Runnable, AutoCloseable {
             LOG.trace("received: {} bytes", iobytes);
         }
         if (handler.readBytes(iobytes, attachment)) {
-            //TODO: task.run();
             attachment.task.accept(attachment);
             attachment.ts = System.currentTimeMillis();
             key.interestOps(key.interestOps() & (~SelectionKey.OP_READ));
@@ -161,7 +166,7 @@ class NioController implements Runnable, AutoCloseable {
 
             while (!Thread.interrupted()) {
                 final int selected = selector.select(1000);
-                LOG.debug("selected: {}", selected);
+                LOG.trace("selected: {}", selected);
                 if (0 < selected) {
                     final Iterator<SelectionKey> keys = selector.selectedKeys().iterator();
                     while (keys.hasNext()) {
@@ -178,7 +183,7 @@ class NioController implements Runnable, AutoCloseable {
                                 }
                             }
                         } catch (final IOException x) {
-                            LOG.error("SELECTED KEY HANDLING ERROR", x);
+                            LOG.error(String.format("SELECTED KEY %s HANDLING ERROR", getRequestUrl(key)), x);
                             onError(key, x);
                         }
                     }
@@ -189,9 +194,10 @@ class NioController implements Runnable, AutoCloseable {
                                 && ((SocketChannel) key.channel()).isConnected()
                                 && 0 == key.interestOps()) {
                             final Att attachment = (Att) key.attachment();
-                            if (System.currentTimeMillis() - attachment.ts > 5000L) {
-                                LOG.debug("Time to request after idle timeout: {}",
-                                        System.currentTimeMillis() - attachment.ts);
+                            final long elapsedMs = System.currentTimeMillis() - attachment.ts;
+                            if (elapsedMs > REQ_PERIOD) {
+                                LOG.debug("Time to request {} after idle timeout: {}",
+                                        attachment.task.url, elapsedMs);
                                 attachment.ts = System.currentTimeMillis();
                                 key.interestOps(key.interestOps() | SelectionKey.OP_WRITE);
                                 key.selector().wakeup();
@@ -206,13 +212,14 @@ class NioController implements Runnable, AutoCloseable {
                             return req.address.equals(a.address);
                         })) {
                             try {
-                                if (System.currentTimeMillis() - req.ts >= 5000L) {
-                                    LOG.debug("Time to connect after error timeout: {}",
-                                            System.currentTimeMillis() - req.ts);
+                                final long elapsedMs = System.currentTimeMillis() - req.ts;
+                                if (elapsedMs >= REQ_PERIOD) {
+                                    LOG.debug("Time to connect {} after error timeout: {}",
+                                            req.task.url, elapsedMs);
                                     initConn(req);
                                 }
                             } catch (final IOException e) {
-                                LOG.error("ERROR CONNECTING AFTER ERROR", e);
+                                LOG.error(String.format("ERROR CONNECTING %s AFTER ERROR", req.task.url), e);
                             }
                         }
                     });
@@ -225,6 +232,16 @@ class NioController implements Runnable, AutoCloseable {
         }
     }
 
+    private URL getRequestUrl(final SelectionKey key) {
+        return ((Att) key.attachment()).task.url;
+    }
+
+    /**
+     * Debug usage only
+     *
+     * @param timeout time to wait
+     */
+    @SuppressWarnings("unused")
     private void waitABit(final long timeout) {
         try {
             synchronized (objLock) {
@@ -312,6 +329,7 @@ class NioController implements Runnable, AutoCloseable {
                             0x200 + Optional.ofNullable(this.response).map(e -> e.length())
                                     .orElse(0));
             sb.append("Att{");
+            sb.append(", url=").append(task.url);
             sb.append(", address=").append(address);
             sb.append(", buffer=").append(buffer);
             sb.append(", read=").append(received);

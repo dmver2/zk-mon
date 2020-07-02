@@ -4,7 +4,8 @@ package home.dv.zkmon;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.net.InetSocketAddress;
+import java.net.MalformedURLException;
+import java.net.URL;
 import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -15,7 +16,7 @@ public class Nio1WithProto {
     private static final Logger LOG = LoggerFactory.getLogger(Nio1WithProto.class);
 
     /**
-     * @param args
+     * @param args command line: zookeeper url list
      */
     public static void main(final String[] args) {
 
@@ -24,25 +25,29 @@ public class Nio1WithProto {
         final List<BasicTask> requests = Stream.of(args)
                 .map(arg ->
                         {
-                            final String[] lexemes = arg.split(":");
-                            final String host = lexemes[0];
-                            final int port = Integer.parseInt(lexemes[1]);
+                            final URL url;
+                            try {
+                                url = new URL(arg);
+                            } catch (final MalformedURLException e) {
+                                throw new Error(e);
+                            }
+                            final int port = (-1 != url.getPort()) ? url.getPort() : url.getDefaultPort();
                             switch (port) {
                                 case 8080:
-                                    return new ZkTaskImpl(new InetSocketAddress(host, port),
-                                            String.format("GET /commands/mntr HTTP/1.1%n"
+                                    return new ZkTaskImpl(url,
+                                            String.format("GET %s HTTP/1.1%n"
                                                     + "Host: %s:%d%n"
                                                     + "Connection: Keep-Alive%n"
                                                     + "Cache-Control:max-age=0"
-                                                    + "Accept: */*%n%n", host, port)
+                                                    + "Accept: */*%n%n", url.getPath(), url.getHost(), port)
                                     );
                                 default:
-                                    return new BasicTask(new InetSocketAddress(host, port),
-                                            String.format("GET / HTTP/1.1%n"
+                                    return new BasicTask(url,
+                                            String.format("GET %s HTTP/1.1%n"
                                                     + "Host: %s:%d%n"
                                                     + "Connection: Keep-Alive%n"
                                                     + "Cache-Control:max-age=0"
-                                                    + "Accept: */*%n%n", host, port)
+                                                    + "Accept: */*%n%n", url.getPath(), url.getHost(), port)
                                     );
                             }
                         }
