@@ -28,15 +28,15 @@ class NioController implements Runnable, AutoCloseable {
     private List<Att> attachments;
     private Selector selector;
 
-    NioController(List<BasicTask> requests) {
+    NioController(final List<BasicTask> requests) {
         this.requests = requests;
     }
 
-    private static void closeQuietly(Closeable closeable) {
+    private static void closeQuietly(final Closeable closeable) {
         try {
             LOG.trace("Application is about to close {}...", closeable);
             closeable.close();
-        } catch (IOException e) {
+        } catch (final IOException e) {
             LOG.error("FAILED CLOSING {}", closeable, e);
         }
     }
@@ -46,10 +46,10 @@ class NioController implements Runnable, AutoCloseable {
         closeQuietly(selector);
     }
 
-    private void initConn(Att attachment) throws IOException {
-        SocketChannel channel;
+    private void initConn(final Att attachment) throws IOException {
+        final SocketChannel channel;
         channel = SocketChannel.open();
-        var rcvBufSize = channel.getOption(StandardSocketOptions.SO_RCVBUF);
+        final var rcvBufSize = channel.getOption(StandardSocketOptions.SO_RCVBUF);
         LOG.debug("recv buffer size: {} {} {}", rcvBufSize, (rcvBufSize < RECV_BUF) ? '<' : ">=",
                 RECV_BUF);
         if (rcvBufSize < RECV_BUF) {
@@ -63,8 +63,8 @@ class NioController implements Runnable, AutoCloseable {
         channel.connect(attachment.address);
     }
 
-    private Att makeAttachment(BasicTask task) {
-        byte[] messageBytes =
+    private Att makeAttachment(final BasicTask task) {
+        final byte[] messageBytes =
                 task.request.getBytes(StandardCharsets.ISO_8859_1);
 
         return new Att(
@@ -76,8 +76,8 @@ class NioController implements Runnable, AutoCloseable {
         );
     }
 
-    private void onConnect(SelectionKey key) throws IOException {
-        SocketChannel channel = (SocketChannel) key.channel();
+    private void onConnect(final SelectionKey key) throws IOException {
+        final SocketChannel channel = (SocketChannel) key.channel();
         if (channel.isConnectionPending()) {
             if (channel.finishConnect()) {
                 LOG.debug("Connected to: {}", channel.getRemoteAddress());
@@ -90,12 +90,12 @@ class NioController implements Runnable, AutoCloseable {
         }
     }
 
-    private void onError(SelectionKey key, Exception x) {
+    private void onError(final SelectionKey key, final Exception x) {
         key.cancel();
         Optional.ofNullable(key.channel())
                 .filter(AbstractInterruptibleChannel::isOpen)
                 .ifPresent(NioController::closeQuietly);
-        Att atta = (Att) key.attachment();
+        final Att atta = (Att) key.attachment();
         atta.error = x;
         atta.task.accept(atta);
         atta.reset();
@@ -103,27 +103,27 @@ class NioController implements Runnable, AutoCloseable {
         //            waitABit();
         try {
             initConn(atta);
-        } catch (IOException e) {
+        } catch (final IOException e) {
             LOG.error("ERROR CONNECTING AFTER ERROR", e);
         }
     }
 
-    private void read(SelectionKey key) throws IOException {
-        Att attachment = (Att) key.attachment();
+    private void read(final SelectionKey key) throws IOException {
+        final Att attachment = (Att) key.attachment();
         if (attachment.readCompleted()) {
             return;
         }
         // reset write state
         attachment.written = 0;
 
-        SocketChannel channel = (SocketChannel) key.channel();
+        final SocketChannel channel = (SocketChannel) key.channel();
 
-        ByteBuffer readBuffer = attachment.buffer; // ByteBuffer.allocate(0x400);
+        final ByteBuffer readBuffer = attachment.buffer; // ByteBuffer.allocate(0x400);
         readBuffer.clear();
-        int iobytes;
+        final int iobytes;
         try {
             iobytes = channel.read(readBuffer);
-        } catch (IOException e) {
+        } catch (final IOException e) {
             LOG.error("Reading problem, closing connection to {}",
                     channel.getRemoteAddress(), e);
             key.cancel();
@@ -153,20 +153,19 @@ class NioController implements Runnable, AutoCloseable {
         try {
             selector = Selector.open();
             attachments = new ArrayList<>(requests.size());
-            for (BasicTask task : requests) {
-                Att att = makeAttachment(task);
+            for (final BasicTask task : requests) {
+                final Att att = makeAttachment(task);
                 attachments.add(att);
                 initConn(att);
             }
 
             while (!Thread.interrupted()) {
-                long ts = System.currentTimeMillis();
-                int selected = selector.select(1000);
+                final int selected = selector.select(1000);
                 LOG.debug("selected: {}", selected);
                 if (0 < selected) {
-                    Iterator<SelectionKey> keys = selector.selectedKeys().iterator();
+                    final Iterator<SelectionKey> keys = selector.selectedKeys().iterator();
                     while (keys.hasNext()) {
-                        SelectionKey key = keys.next();
+                        final SelectionKey key = keys.next();
                         try {
                             keys.remove();
                             if (key.isValid()) {
@@ -178,7 +177,7 @@ class NioController implements Runnable, AutoCloseable {
                                     read(key);
                                 }
                             }
-                        } catch (IOException x) {
+                        } catch (final IOException x) {
                             LOG.error("SELECTED KEY HANDLING ERROR", x);
                             onError(key, x);
                         }
@@ -189,7 +188,7 @@ class NioController implements Runnable, AutoCloseable {
                         if (key.channel().isOpen()
                                 && ((SocketChannel) key.channel()).isConnected()
                                 && 0 == key.interestOps()) {
-                            Att attachment = (Att) key.attachment();
+                            final Att attachment = (Att) key.attachment();
                             if (System.currentTimeMillis() - attachment.ts > 5000L) {
                                 LOG.debug("Time to request after idle timeout: {}",
                                         System.currentTimeMillis() - attachment.ts);
@@ -203,7 +202,7 @@ class NioController implements Runnable, AutoCloseable {
                 if (selector.keys().size() != requests.size()) {
                     attachments.forEach(req -> {
                         if (selector.keys().stream().noneMatch(sk -> {
-                            Att a = (Att) sk.attachment();
+                            final Att a = (Att) sk.attachment();
                             return req.address.equals(a.address);
                         })) {
                             try {
@@ -212,32 +211,32 @@ class NioController implements Runnable, AutoCloseable {
                                             System.currentTimeMillis() - req.ts);
                                     initConn(req);
                                 }
-                            } catch (IOException e) {
+                            } catch (final IOException e) {
                                 LOG.error("ERROR CONNECTING AFTER ERROR", e);
                             }
                         }
                     });
                 }
             }
-        } catch (IOException x) {
+        } catch (final IOException x) {
             LOG.error("ERROR", x);
         } finally {
             close();
         }
     }
 
-    private void waitABit(long timeout) {
+    private void waitABit(final long timeout) {
         try {
             synchronized (objLock) {
                 TimeUnit.MILLISECONDS.timedWait(objLock, timeout);
             }
-        } catch (InterruptedException e) {
+        } catch (final InterruptedException e) {
             LOG.error("INTERRUPTED", e);
         }
     }
 
-    private void write(SelectionKey key) throws IOException {
-        Att attachment = (Att) key.attachment();
+    private void write(final SelectionKey key) throws IOException {
+        final Att attachment = (Att) key.attachment();
         if (attachment.writeCompleted()) {
             return;
         }
@@ -246,10 +245,10 @@ class NioController implements Runnable, AutoCloseable {
         attachment.response.setLength(0); // attachment.sb.delete(0, attachment.sb.length());
         attachment.received = 0;
 
-        SocketChannel channel = (SocketChannel) key.channel();
-        ByteBuffer buffer = attachment.msgBuffer;
+        final SocketChannel channel = (SocketChannel) key.channel();
+        final ByteBuffer buffer = attachment.msgBuffer;
 
-        int written = channel.write(buffer);
+        final int written = channel.write(buffer);
         attachment.written += written;
 
         LOG.debug("addr: {} WRITTEN {} bytes ({} {})",
@@ -281,10 +280,10 @@ class NioController implements Runnable, AutoCloseable {
         int written;
         Throwable error;
 
-        Att(final BasicTask task, SocketAddress address,
-            ByteBuffer aMsgBuffer,
-            ByteBuffer buffer,
-            StringBuilder stringBuilder) {
+        Att(final BasicTask task, final SocketAddress address,
+            final ByteBuffer aMsgBuffer,
+            final ByteBuffer buffer,
+            final StringBuilder stringBuilder) {
             this.task = task;
             this.msgBuffer = aMsgBuffer;
             this.buffer = buffer;
@@ -308,7 +307,7 @@ class NioController implements Runnable, AutoCloseable {
 
         @Override
         public String toString() {
-            StringBuilder sb =
+            final StringBuilder sb =
                     new StringBuilder(
                             0x200 + Optional.ofNullable(this.response).map(e -> e.length())
                                     .orElse(0));

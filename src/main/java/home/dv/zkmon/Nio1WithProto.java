@@ -17,16 +17,16 @@ public class Nio1WithProto {
     /**
      * @param args
      */
-    public static void main(String[] args) {
+    public static void main(final String[] args) {
 
         LOG.info("nio1 requests to: {}", Arrays.toString(args));
 
-        List<BasicTask> requests = Stream.of(args)
+        final List<BasicTask> requests = Stream.of(args)
                 .map(arg ->
                         {
-                            String[] lexemes = arg.split(":");
-                            String host = lexemes[0];
-                            int port = Integer.parseInt(lexemes[1]);
+                            final String[] lexemes = arg.split(":");
+                            final String host = lexemes[0];
+                            final int port = Integer.parseInt(lexemes[1]);
                             switch (port) {
                                 case 8080:
                                     return new ZkTaskImpl(new InetSocketAddress(host, port),
@@ -48,7 +48,7 @@ public class Nio1WithProto {
                         }
                 ).collect(Collectors.toList());
 
-        NioController nioController = new NioController(requests);
+        final NioController nioController = new NioController(requests);
         nioController.run();
     }
 

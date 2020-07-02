@@ -19,6 +19,6 @@ public class BasicTask implements Consumer<NioController.Att> {
 
     @Override
     public void accept(final NioController.Att att) {
-        LOG.debug("%s", att);
+        LOG.debug(att.toString());
     }
 }

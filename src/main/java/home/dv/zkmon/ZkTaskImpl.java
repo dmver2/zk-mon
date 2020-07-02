@@ -49,7 +49,7 @@ public class ZkTaskImpl extends BasicTask {
                     LOG.error("zk ERROR: {}", error);
                 }
             }
-        } catch (JsonProcessingException e) {
+        } catch (final JsonProcessingException e) {
             LOG.error("JSON parsing FAILED", e);
         }
     }

@@ -21,7 +21,7 @@ public class HttpStreamHandler implements NetStreamHandler {
     private static final Logger LOGGER = LoggerFactory.getLogger(HttpStreamHandler.class);
 
     @Override
-    public boolean readBytes(Integer ioBytes, NioController.Att actionInfo) {
+    public boolean readBytes(final Integer ioBytes, final NioController.Att actionInfo) {
         actionInfo.received += ioBytes;
         final ByteBuffer buffer = actionInfo.buffer;
         buffer.flip();
