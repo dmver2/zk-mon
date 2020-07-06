@@ -6,7 +6,7 @@ BASEDIR=$(dirname "$0")
 JAVABIN=${JAVA_HOME}/bin/java
 JAR_VERSION=1.0-SNAPSHOT
 
-if [ "$1" == "" ]; then
+if [ $# == 0 ]; then
   # shellcheck disable=SC2039
   printf "Usage syntax:\n%s zk-url1 [zk-url2...]\ne.g.:\n%s http://localhost:8080/commands/mntr http://%s:8080/commands/mntr" ${PROGNAME} ${PROGNAME} ${HOSTNAME}
   exit 1
