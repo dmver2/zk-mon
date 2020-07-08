@@ -104,7 +104,6 @@ class NioController implements Runnable, AutoCloseable {
         atta.error = x;
         atta.task.accept(atta);
         atta.reset();
-        atta.ts = System.currentTimeMillis();
         //            waitABit();
         try {
             initConn(atta);
@@ -148,7 +147,7 @@ class NioController implements Runnable, AutoCloseable {
         }
         if (handler.readBytes(iobytes, attachment)) {
             attachment.task.accept(attachment);
-            attachment.ts = System.currentTimeMillis();
+            attachment.reset();
             key.interestOps(key.interestOps() & (~SelectionKey.OP_READ));
             key.selector().wakeup();
         }
@@ -259,7 +258,7 @@ class NioController implements Runnable, AutoCloseable {
         }
 
         // reset read state
-        attachment.response.setLength(0); // attachment.sb.delete(0, attachment.sb.length());
+        attachment.response.setLength(0);
         attachment.received = 0;
 
         final SocketChannel channel = (SocketChannel) key.channel();
@@ -268,7 +267,8 @@ class NioController implements Runnable, AutoCloseable {
         final int written = channel.write(buffer);
         attachment.written += written;
 
-        LOG.debug("addr: {} WRITTEN {} bytes ({} {})",
+        LOG.debug("url: {} addr: {} WRITTEN {} bytes ({} {})",
+                attachment.task.url,
                 channel.getRemoteAddress(),
                 attachment.written,
                 attachment.written == buffer.limit() ? "all of" : "less than",
@@ -291,11 +291,11 @@ class NioController implements Runnable, AutoCloseable {
         final BasicTask task;
         int contentLength;
         boolean chunked;
+        Throwable error;
         int headerLength;
         int received;
         long ts;
         int written;
-        Throwable error;
 
         Att(final BasicTask task, final SocketAddress address,
             final ByteBuffer aMsgBuffer,
@@ -305,7 +305,8 @@ class NioController implements Runnable, AutoCloseable {
             this.msgBuffer = aMsgBuffer;
             this.buffer = buffer;
             this.address = address;
-            response = stringBuilder;
+            this.response = stringBuilder;
+            this.ts = System.currentTimeMillis();
         }
 
         public boolean readCompleted() {
@@ -313,9 +314,14 @@ class NioController implements Runnable, AutoCloseable {
         }
 
         public void reset() {
-            written = 0;
-            received = 0;
+            contentLength = 0;
+            chunked = false;
             error = null;
+            headerLength = 0;
+            received = 0;
+            response.setLength(0);
+            ts = System.currentTimeMillis();
+            written = 0;
         }
 
         public boolean writeCompleted() {

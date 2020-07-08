@@ -13,5 +13,6 @@ if [ $# == 0 ]; then
 fi
 ${JAVABIN} -Xms8m -Xmx8m \
   -Dfile.encoding=UTF-8 \
+  -Dnetworkaddress.cache.ttl=10
   -jar ${BASEDIR}/../build/libs/zk-mon-${JAR_VERSION}.jar \
   $*

@@ -19,7 +19,7 @@ public class BasicTask implements Consumer<NioController.Att> {
 
     @Override
     public void accept(final NioController.Att att) {
-        LOG.debug("u: %s %s", url, att.toString());
+        LOG.debug("u: {} {}", url, att.toString());
     }
 
     @Override
