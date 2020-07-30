@@ -1,0 +1,22 @@
+{
+  "version": "3.5.6-c11b7e26bc554b8523dc929761dd28808913f091, built on 10/08/2019 20:18 GMT",
+  "avg_latency": 9,
+  "max_latency": 82,
+  "min_latency": 0,
+  "packets_received": 20,
+  "packets_sent": 20,
+  "num_alive_connections": 1,
+  "outstanding_requests": 0,
+  "server_state": "standalone",
+  "znode_count": 5,
+  "watch_count": 0,
+  "ephemerals_count": 0,
+  "approximate_data_size": 44,
+  "open_file_descriptor_count": -1,
+  "max_file_descriptor_count": -1,
+  "last_client_response_size": 16,
+  "max_client_response_size": 88,
+  "min_client_response_size": 16,
+  "command": "monitor",
+  "error": null
+}

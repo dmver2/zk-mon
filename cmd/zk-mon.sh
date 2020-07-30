@@ -13,6 +13,11 @@ if [ $# == 0 ]; then
 fi
 ${JAVABIN} -Xms8m -Xmx8m \
   -Dfile.encoding=UTF-8 \
-  -Dnetworkaddress.cache.ttl=10
+  -Dnetworkaddress.cache.ttl=10 \
+  -Dnetworkaddress.cache.negative.ttl=10 \
+  -Dcom.sun.management.jmxremote.local.only \
+  -Djava.rmi.server.hostname=127.0.0.1 \
+  -Djava.net.preferIPv4Stack=true \
+  -XX:+HeapDumpOnOutOfMemoryError \
   -jar ${BASEDIR}/../build/libs/zk-mon-${JAR_VERSION}.jar \
   $*

@@ -1,0 +1,39 @@
+{
+  "version" : "3.5.6-c11b7e26bc554b8523dc929761dd28808913f091, built on 10/08/2019 20:18 GMT",
+  "read_only" : false,
+  "server_stats" : {
+    "packets_sent" : 19,
+    "packets_received" : 19,
+    "max_latency" : 82,
+    "min_latency" : 0,
+    "fsync_threshold_exceed_count" : 0,
+    "client_response_stats" : {
+      "last_buffer_size" : 16,
+      "min_buffer_size" : 16,
+      "max_buffer_size" : 88
+    },
+    "outstanding_requests" : 0,
+    "last_processed_zxid" : 10,
+    "num_alive_client_connections" : 1,
+    "log_dir_size" : 201327912,
+    "data_dir_size" : 201327912,
+    "provider_null" : false,
+    "server_state" : "standalone",
+    "avg_latency" : 10
+  },
+  "client_response" : {
+    "last_buffer_size" : 16,
+    "min_buffer_size" : 16,
+    "max_buffer_size" : 88
+  },
+  "node_count" : 5,
+  "connections" : [ {
+    "remote_socket_address" : "[0:0:0:0:0:0:0:1]:61224",
+    "interest_ops" : 1,
+    "outstanding_requests" : 0,
+    "packets_received" : 19,
+    "packets_sent" : 19
+  } ],
+  "command" : "stats",
+  "error" : null
+}

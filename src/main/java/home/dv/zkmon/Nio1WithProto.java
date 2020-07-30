@@ -32,24 +32,22 @@ public class Nio1WithProto {
                                 throw new Error(e);
                             }
                             final int port = (-1 != url.getPort()) ? url.getPort() : url.getDefaultPort();
-                            switch (port) {
-                                case 8080:
-                                    return new ZkTaskImpl(url,
-                                            String.format("GET %s HTTP/1.1%n"
-                                                    + "Host: %s:%d%n"
-                                                    + "Connection: Keep-Alive%n"
-                                                    + "Cache-Control:max-age=0"
-                                                    + "Accept: */*%n%n", url.getPath(), url.getHost(), port)
-                                    );
-                                default:
-                                    return new BasicTask(url,
-                                            String.format("GET %s HTTP/1.1%n"
-                                                    + "Host: %s:%d%n"
-                                                    + "Connection: Keep-Alive%n"
-                                                    + "Cache-Control:max-age=0"
-                                                    + "Accept: */*%n%n", url.getPath(), url.getHost(), port)
-                                    );
-                            }
+                            return switch (port) {
+                                case 8080 -> new ZkTaskImpl(url,
+                                        String.format("GET %s HTTP/1.1%n"
+                                                + "Host: %s:%d%n"
+                                                + "Connection: Keep-Alive%n"
+                                                + "Cache-Control:max-age=0"
+                                                + "Accept: */*%n%n", url.getPath(), url.getHost(), port)
+                                );
+                                default -> new BasicTask(url,
+                                        String.format("GET %s HTTP/1.1%n"
+                                                + "Host: %s:%d%n"
+                                                + "Connection: Keep-Alive%n"
+                                                + "Cache-Control:max-age=0"
+                                                + "Accept: */*%n%n", url.getPath(), url.getHost(), port)
+                                );
+                            };
                         }
                 ).collect(Collectors.toList());
 
